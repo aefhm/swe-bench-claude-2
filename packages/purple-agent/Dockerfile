@@ -33,5 +33,5 @@ RUN \
 
 WORKDIR /home/agent/packages/purple-agent
 ENTRYPOINT ["uv", "run", "--package", "purple-agent", "python", "src/server.py"]
-CMD ["--host", "0.0.0.0", "--port", "9012"]
-EXPOSE 9012
+CMD ["--host", "0.0.0.0", "--port", "9009"]
+EXPOSE 9009

@@ -34,5 +34,5 @@ RUN \
 
 WORKDIR /home/agent/packages/green-agent
 ENTRYPOINT ["uv", "run", "--package", "swe-bench-green-agent", "python", "src/server.py"]
-CMD ["--host", "0.0.0.0", "--port", "9011"]
-EXPOSE 9011
+CMD ["--host", "0.0.0.0", "--port", "9009"]
+EXPOSE 9009

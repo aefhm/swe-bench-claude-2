@@ -9,13 +9,15 @@
 [green_agent]
 agentbeats_id = ""  # TODO: set after registering on agentbeats.dev
 # For local testing without agentbeats registration:
-# image = "ghcr.io/rdi-foundation/swe-bench-green/green-agent:latest"
+image = "ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest"
 env = { DOCKERHUB_USERNAME = "jefzda" }
 
 [[participants]]
 agentbeats_id = ""  # Submitter fills this in
+# For local testing:
+image = "ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest"
 name = "coding_agent"
-env = { OPENAI_API_KEY = "${OPENAI_API_KEY}", ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}", MODEL_NAME = "gpt-4o" }
+env = { USE_GOLD_PATCHES = "true" }
 
 [config]
 max_instances = 1

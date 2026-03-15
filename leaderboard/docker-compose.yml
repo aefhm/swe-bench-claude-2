@@ -1,0 +1,62 @@
+# Auto-generated from scenario.toml
+
+services:
+  green-agent:
+    image: ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest
+    platform: linux/amd64
+    container_name: green-agent
+    user: "root"
+    command: ["--host", "0.0.0.0", "--port", "9009", "--card-url", "http://green-agent:9009"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOCKERHUB_USERNAME=jefzda
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9009/.well-known/agent-card.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      coding_agent:
+        condition: service_healthy
+    networks:
+      - agent-network
+
+  coding_agent:
+    image: ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest
+    platform: linux/amd64
+    container_name: coding_agent
+    command: ["--host", "0.0.0.0", "--port", "9009", "--card-url", "http://coding_agent:9009"]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - USE_GOLD_PATCHES=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9009/.well-known/agent-card.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - agent-network
+
+  agentbeats-client:
+    image: ghcr.io/agentbeats/agentbeats-client:v1.0.0
+    platform: linux/amd64
+    container_name: agentbeats-client
+    volumes:
+      - ./a2a-scenario.toml:/app/scenario.toml
+      - ./output:/app/output
+    command: ["scenario.toml", "output/results.json"]
+    depends_on:
+      green-agent:
+        condition: service_healthy
+      coding_agent:
+        condition: service_healthy
+    networks:
+      - agent-network
+
+networks:
+  agent-network:
+    driver: bridge

@@ -1,0 +1,10 @@
+[green_agent]
+endpoint = "http://green-agent:9009"
+
+[[participants]]
+role = "coding_agent"
+endpoint = "http://coding_agent:9009"
+agentbeats_id = ""
+
+[config]
+max_instances = 1

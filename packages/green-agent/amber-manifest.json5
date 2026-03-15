@@ -17,7 +17,7 @@
 
   program: {
     image: "ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest",
-    entrypoint: ["uv", "run", "--package", "swe-bench-green-agent", "python", "src/server.py", "--host", "0.0.0.0", "--port", "9011"],
+    entrypoint: ["uv", "run", "--package", "swe-bench-green-agent", "python", "src/server.py", "--host", "0.0.0.0", "--port", "9009"],
 
     env: {
       DOCKERHUB_USERNAME: "${config.dockerhub_username}",
@@ -30,7 +30,7 @@
 
     network: {
       endpoints: [
-        { name: "a2a_endpoint", port: 9011 },
+        { name: "a2a_endpoint", port: 9009 },
       ],
     },
   },

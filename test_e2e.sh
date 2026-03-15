@@ -15,8 +15,8 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 GREEN_DIR="$REPO_ROOT/packages/green-agent"
 PURPLE_DIR="$REPO_ROOT/packages/purple-agent"
 
-GREEN_PORT=9011
-PURPLE_PORT=9012
+GREEN_PORT=9009
+PURPLE_PORT=9010
 
 GREEN_PID=""
 PURPLE_PID=""

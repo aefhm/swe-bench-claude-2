@@ -3,4 +3,4 @@ __pycache__/
 .venv/
 amber-generated/
 *.egg-info/
-packages/green-agent/data/run_scripts/
+leaderboard/output/

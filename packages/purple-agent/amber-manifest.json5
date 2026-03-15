@@ -20,7 +20,7 @@
 
   program: {
     image: "ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest",
-    entrypoint: ["uv", "run", "--package", "purple-agent", "python", "src/server.py", "--host", "0.0.0.0", "--port", "9012"],
+    entrypoint: ["uv", "run", "--package", "purple-agent", "python", "src/server.py", "--host", "0.0.0.0", "--port", "9009"],
 
     env: {
       MODEL_NAME: "${config.model_name}",
@@ -35,7 +35,7 @@
 
     network: {
       endpoints: [
-        { name: "a2a_endpoint", port: 9012 },
+        { name: "a2a_endpoint", port: 9009 },
       ],
     },
   },

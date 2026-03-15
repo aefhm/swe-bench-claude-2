@@ -62,8 +62,11 @@ services:
     image: {green_image}
     platform: linux/amd64
     container_name: green-agent
+    user: "root"
     command: ["--host", "0.0.0.0", "--port", "{green_port}", "--card-url", "http://green-agent:{green_port}"]
     environment:{green_env}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:{green_port}/.well-known/agent-card.json"]
       interval: 5s
@@ -117,16 +120,13 @@ endpoint = "http://green-agent:{green_port}"
 
 def resolve_image(agent: dict, name: str) -> None:
     """Resolve docker image for an agent, either from 'image' field or agentbeats API."""
-    has_image = "image" in agent
-    has_id = "agentbeats_id" in agent
+    has_image = "image" in agent and agent["image"]
+    has_id = "agentbeats_id" in agent and agent["agentbeats_id"]
 
     if has_image and has_id:
         print(f"Error: {name} has both 'image' and 'agentbeats_id' - use one or the other")
         sys.exit(1)
     elif has_image:
-        if os.environ.get("GITHUB_ACTIONS"):
-            print(f"Error: {name} requires 'agentbeats_id' for GitHub Actions (use 'image' for local testing only)")
-            sys.exit(1)
         print(f"Using {name} image: {agent['image']}")
     elif has_id:
         info = fetch_agent_info(agent["agentbeats_id"])

@@ -77,8 +77,8 @@ jobs:
             --network swe-bench-test \
             -v /var/run/docker.sock:/var/run/docker.sock \
             $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) \
-            --host 0.0.0.0 --port 9012 --use-gold-patches
-          timeout 30 bash -c 'until docker exec purple-agent curl -sf http://127.0.0.1:9012/.well-known/agent-card.json > /dev/null 2>&1; do sleep 1; done'
+            --host 0.0.0.0 --port 9009 --use-gold-patches
+          timeout 30 bash -c 'until docker exec purple-agent curl -sf http://127.0.0.1:9009/.well-known/agent-card.json > /dev/null 2>&1; do sleep 1; done'
           echo "Purple agent is ready."
 
       - name: Start green-agent container
@@ -88,10 +88,10 @@ jobs:
             --network swe-bench-test \
             --user root \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            -p 9011:9011 \
+            -p 9009:9009 \
             $(echo "${{ steps.meta-green.outputs.tags }}" | head -n1) \
-            --host 0.0.0.0 --port 9011
-          timeout 30 bash -c 'until curl -sf http://localhost:9011/.well-known/agent-card.json > /dev/null; do sleep 1; done'
+            --host 0.0.0.0 --port 9009
+          timeout 30 bash -c 'until curl -sf http://localhost:9009/.well-known/agent-card.json > /dev/null; do sleep 1; done'
           echo "Green agent is ready."
 
       - name: Set up uv
@@ -100,8 +100,8 @@ jobs:
       - name: Run gold-patch e2e test
         run: |
           uv run python test_e2e_client.py \
-            --green-url http://localhost:9011 \
-            --purple-url http://purple-agent:9012
+            --green-url http://localhost:9009 \
+            --purple-url http://purple-agent:9009
         timeout-minutes: 15
 
       - name: Show container logs
