@@ -1,0 +1,17 @@
+{
+  "image_digests": {
+    "green-agent": "ghcr.io/aefhm/swe-bench-claude-2/green-agent@sha256:ac083d4d91bdfcdc63db51a93ba5fe195f027d02a27d1557f1a9687d0b021113",
+    "coding_agent": "ghcr.io/aefhm/swe-bench-claude-2/purple-agent@sha256:af2abecb6c178b6ce781b05e6dac880479d1af46b0c77870e1927d7236c240a1",
+    "agentbeats-client": "ghcr.io/agentbeats/agentbeats-client@sha256:13dfe3ef4e583a80e7ce2fe3becd0ce3b879841368a7f4fa40b6ebbabeeb014e"
+  },
+  "timestamp": "2026-03-15T23:34:56Z",
+  "github_actions": {
+    "run_url": "https://github.com/aefhm/swe-bench-claude-2/actions/runs/23121926181",
+    "run_logs_url": "https://api.github.com/repos/aefhm/swe-bench-claude-2/actions/runs/23121926181/logs",
+    "ref": "refs/heads/main",
+    "sha": "431239e15fa05470786609ac6581f10321fd3ca7",
+    "repository_url": "https://github.com/aefhm/swe-bench-claude-2",
+    "workflow_ref": "aefhm/swe-bench-claude-2/.github/workflows/run-scenario.yml@refs/heads/main",
+    "workflow_sha": "431239e15fa05470786609ac6581f10321fd3ca7"
+  }
+}
