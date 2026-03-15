@@ -66,55 +66,78 @@ jobs:
           load: true
           platforms: linux/amd64
 
-      # ── Smoke test: start both containers, run gold-patch e2e ────
-      - name: Create test network
-        run: docker network create swe-bench-test
-
-      - name: Start purple-agent container (gold mode)
+      # ── Tag built images to match scenario references ────────────
+      - name: Tag images for scenario
         run: |
-          docker run -d \
-            --name purple-agent \
-            --network swe-bench-test \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) \
-            --host 0.0.0.0 --port 9009 --use-gold-patches
-          timeout 30 bash -c 'until docker exec purple-agent curl -sf http://127.0.0.1:9009/.well-known/agent-card.json > /dev/null 2>&1; do sleep 1; done'
-          echo "Purple agent is ready."
+          docker tag $(echo "${{ steps.meta-green.outputs.tags }}" | head -n1) ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest
+          docker tag $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest
 
-      - name: Start green-agent container
+      # ── Gold-patch smoke test via scenario.ci.toml ───────────────
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install generate_compose dependencies
+        run: pip install tomli tomli-w pyyaml requests
+
+      - name: Generate docker-compose from scenario.ci.toml
+        working-directory: leaderboard
+        run: python generate_compose.py --scenario scenario.ci.toml
+
+      - name: Show generated files
+        working-directory: leaderboard
         run: |
-          docker run -d \
-            --name green-agent \
-            --network swe-bench-test \
-            --user root \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -p 9009:9009 \
-            $(echo "${{ steps.meta-green.outputs.tags }}" | head -n1) \
-            --host 0.0.0.0 --port 9009
-          timeout 30 bash -c 'until curl -sf http://localhost:9009/.well-known/agent-card.json > /dev/null; do sleep 1; done'
-          echo "Green agent is ready."
+          echo "=== docker-compose.yml ==="
+          cat docker-compose.yml
+          echo ""
+          echo "=== a2a-scenario.toml ==="
+          cat a2a-scenario.toml
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+      - name: Create output directory
+        working-directory: leaderboard
+        run: mkdir -p output && chmod 777 output
 
-      - name: Run gold-patch e2e test
+      - name: Run gold-patch assessment
+        working-directory: leaderboard
         run: |
-          uv run python test_e2e_client.py \
-            --green-url http://localhost:9009 \
-            --purple-url http://purple-agent:9009
+          docker compose up --timestamps --no-color \
+            --exit-code-from agentbeats-client \
+            --abort-on-container-exit
         timeout-minutes: 15
+
+      - name: Show results
+        if: always()
+        working-directory: leaderboard
+        run: |
+          if [ -f output/results.json ]; then
+            echo "=== Results ==="
+            cat output/results.json
+            python -c "
+          import json
+          with open('output/results.json') as f:
+              r = json.load(f)
+          print(f\"Accuracy: {r.get('accuracy', 'N/A')}\")
+          print(f\"Passed: {r.get('passed', 'N/A')} / {r.get('total', 'N/A')}\")
+          " || true
+          else
+            echo "No results file found"
+          fi
 
       - name: Show container logs
         if: always()
+        working-directory: leaderboard
         run: |
           echo "=== Green Agent Logs ==="
           docker logs green-agent 2>&1 || true
           echo ""
           echo "=== Purple Agent Logs ==="
-          docker logs purple-agent 2>&1 || true
-          docker stop green-agent purple-agent 2>/dev/null || true
-          docker rm green-agent purple-agent 2>/dev/null || true
-          docker network rm swe-bench-test 2>/dev/null || true
+          docker logs coding_agent 2>&1 || true
+
+      - name: Cleanup test containers
+        if: always()
+        working-directory: leaderboard
+        run: docker compose down -v || true
 
       # ── Push to GHCR (only on main / tags, not PRs) ─────────────
       - name: Log in to GitHub Container Registry

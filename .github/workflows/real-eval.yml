@@ -1,0 +1,118 @@
+name: Real Eval (LLM)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install tomli tomli-w pyyaml requests
+
+      - name: Generate docker-compose.yml
+        working-directory: leaderboard
+        run: python generate_compose.py --scenario scenario.toml
+
+      - name: Show generated files
+        working-directory: leaderboard
+        run: |
+          echo "=== docker-compose.yml ==="
+          cat docker-compose.yml
+          echo ""
+          echo "=== a2a-scenario.toml ==="
+          cat a2a-scenario.toml
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull images
+        working-directory: leaderboard
+        run: docker compose pull
+
+      - name: Create output directory
+        working-directory: leaderboard
+        run: mkdir -p output && chmod 777 output
+
+      - name: Write .env file with secrets
+        working-directory: leaderboard
+        run: |
+          cat > .env <<EOF
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          EOF
+
+      - name: Run assessment
+        working-directory: leaderboard
+        run: |
+          START_TIME=$(date +%s)
+          docker compose up --timestamps --no-color --exit-code-from agentbeats-client --abort-on-container-exit || EXIT_CODE=$?
+          END_TIME=$(date +%s)
+          ELAPSED=$((END_TIME - START_TIME))
+          echo ""
+          echo "=== Timing ==="
+          echo "Total runtime: ${ELAPSED}s ($((ELAPSED / 60))m $((ELAPSED % 60))s)"
+          echo "==============="
+          exit ${EXIT_CODE:-0}
+
+      - name: Show container logs
+        if: always()
+        working-directory: leaderboard
+        run: |
+          echo "=== Green Agent Logs ==="
+          docker logs green-agent 2>&1 | tail -100 || true
+          echo ""
+          echo "=== Purple Agent (coding_agent) Logs ==="
+          docker logs coding_agent 2>&1 | tail -100 || true
+
+      - name: Show results
+        if: always()
+        working-directory: leaderboard
+        run: |
+          if [ -f output/results.json ]; then
+            echo "=== Results ==="
+            cat output/results.json
+            echo ""
+            python -c "
+          import json
+          with open('output/results.json') as f:
+              r = json.load(f)
+          print(f\"Accuracy: {r.get('accuracy', 'N/A')}\")
+          print(f\"Passed: {r.get('passed', 'N/A')} / {r.get('total', 'N/A')}\")
+          for inst in r.get('results', []):
+              print(f\"  {inst.get('instance_id', '?')}: {'PASS' if inst.get('passed') else 'FAIL'}\")
+          " || true
+          else
+            echo "No results file found"
+          fi
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_number }}
+          path: leaderboard/output/
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        working-directory: leaderboard
+        run: docker compose down -v || true
