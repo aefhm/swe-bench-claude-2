@@ -67,25 +67,32 @@ jobs:
           platforms: linux/amd64
 
       # ── Smoke test: start both containers, run gold-patch e2e ────
+      - name: Create test network
+        run: docker network create swe-bench-test
+
+      - name: Start purple-agent container (gold mode)
+        run: |
+          docker run -d \
+            --name purple-agent \
+            --network swe-bench-test \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) \
+            --host 0.0.0.0 --port 9012 --use-gold-patches
+          timeout 30 bash -c 'until docker exec purple-agent curl -sf http://127.0.0.1:9012/.well-known/agent-card.json > /dev/null 2>&1; do sleep 1; done'
+          echo "Purple agent is ready."
+
       - name: Start green-agent container
         run: |
-          docker run -d -p 9011:9011 \
+          docker run -d \
             --name green-agent \
+            --network swe-bench-test \
+            --user root \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -p 9011:9011 \
             $(echo "${{ steps.meta-green.outputs.tags }}" | head -n1) \
             --host 0.0.0.0 --port 9011
           timeout 30 bash -c 'until curl -sf http://localhost:9011/.well-known/agent-card.json > /dev/null; do sleep 1; done'
           echo "Green agent is ready."
-
-      - name: Start purple-agent container (gold mode)
-        run: |
-          docker run -d -p 9012:9012 \
-            --name purple-agent \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) \
-            --host 0.0.0.0 --port 9012 --use-gold-patches
-          timeout 30 bash -c 'until curl -sf http://localhost:9012/.well-known/agent-card.json > /dev/null; do sleep 1; done'
-          echo "Purple agent is ready."
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
@@ -94,18 +101,20 @@ jobs:
         run: |
           uv run python test_e2e_client.py \
             --green-url http://localhost:9011 \
-            --purple-url http://localhost:9012
+            --purple-url http://purple-agent:9012
         timeout-minutes: 15
 
       - name: Show container logs
         if: always()
         run: |
           echo "=== Green Agent Logs ==="
-          docker logs green-agent || true
+          docker logs green-agent 2>&1 || true
           echo ""
           echo "=== Purple Agent Logs ==="
-          docker logs purple-agent || true
-          docker stop green-agent purple-agent || true
+          docker logs purple-agent 2>&1 || true
+          docker stop green-agent purple-agent 2>/dev/null || true
+          docker rm green-agent purple-agent 2>/dev/null || true
+          docker network rm swe-bench-test 2>/dev/null || true
 
       # ── Push to GHCR (only on main / tags, not PRs) ─────────────
       - name: Log in to GitHub Container Registry
@@ -133,7 +142,7 @@ jobs:
       - name: Summary
         if: success() && github.event_name != 'pull_request'
         run: |
-          echo "## Docker Images Published 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Images Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### green-agent" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
