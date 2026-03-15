@@ -1,0 +1,48 @@
+{
+  manifest_version: "0.2.0",
+  experimental_features: ["docker"],
+
+  config_schema: {
+    type: "object",
+    properties: {
+      model_name: {
+        type: "string",
+        description: "LLM model name for mini-swe-agent (e.g., gpt-4o, anthropic/claude-sonnet-4-5-20250929)",
+        default: "gpt-4o",
+      },
+      use_gold_patches: { type: "string", description: "Set to 'true' for gold-patch testing mode", default: "" },
+      openai_api_key: { type: "string", secret: true },
+      anthropic_api_key: { type: "string", secret: true },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+
+  program: {
+    image: "ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest",
+    entrypoint: ["uv", "run", "--package", "purple-agent", "python", "src/server.py", "--host", "0.0.0.0", "--port", "9012"],
+
+    env: {
+      MODEL_NAME: "${config.model_name}",
+      USE_GOLD_PATCHES: "${config.use_gold_patches}",
+      OPENAI_API_KEY: { when: "config.openai_api_key", value: "${config.openai_api_key}" },
+      ANTHROPIC_API_KEY: { when: "config.anthropic_api_key", value: "${config.anthropic_api_key}" },
+    },
+
+    mounts: [
+      { path: "/var/run/docker.sock", from: "framework.docker" },
+    ],
+
+    network: {
+      endpoints: [
+        { name: "a2a_endpoint", port: 9012 },
+      ],
+    },
+  },
+
+  provides: {
+    a2a: { kind: "a2a", endpoint: "a2a_endpoint" },
+  },
+
+  exports: { a2a: "a2a" },
+}

@@ -1,0 +1,28 @@
+{
+  manifest_version: "0.2.0",
+  experimental_features: ["docker"],
+
+  components: {
+    green: {
+      manifest: "../packages/green-agent/amber-manifest.json5",
+      config: {
+        dockerhub_username: "jefzda",
+      },
+    },
+    coding_agent: {
+      manifest: "../packages/purple-agent/amber-manifest.json5",
+      config: {
+        model_name: "gpt-4o",
+        use_gold_patches: "true",
+      },
+    },
+  },
+
+  bindings: [
+    { to: "#green.coding_agent", from: "#coding_agent.a2a" },
+  ],
+
+  exports: {
+    a2a: "#green.a2a",
+  },
+}

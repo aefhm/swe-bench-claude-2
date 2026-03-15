@@ -1,0 +1,8 @@
+[project]
+name = "swe-bench-green"
+version = "0.1.0"
+description = "SWE-bench Pro as an A2A green agent"
+requires-python = ">=3.13"
+
+[tool.uv.workspace]
+members = ["packages/*"]

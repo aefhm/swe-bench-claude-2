@@ -1,0 +1,54 @@
+{
+  manifest_version: "0.2.0",
+  experimental_features: ["docker"],
+
+  config_schema: {
+    type: "object",
+    properties: {
+      dockerhub_username: {
+        type: "string",
+        description: "Docker Hub username where sweap-images are hosted",
+        default: "jefzda",
+      },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+
+  program: {
+    image: "ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest",
+    entrypoint: ["uv", "run", "--package", "swe-bench-green-agent", "python", "src/server.py", "--host", "0.0.0.0", "--port", "9011"],
+
+    env: {
+      DOCKERHUB_USERNAME: "${config.dockerhub_username}",
+      CODING_AGENT_URL: "${slots.coding_agent.url}",
+    },
+
+    mounts: [
+      { path: "/var/run/docker.sock", from: "framework.docker" },
+    ],
+
+    network: {
+      endpoints: [
+        { name: "a2a_endpoint", port: 9011 },
+      ],
+    },
+  },
+
+  slots: {
+    coding_agent: { kind: "a2a" },
+  },
+
+  provides: {
+    a2a: { kind: "a2a", endpoint: "a2a_endpoint" },
+  },
+
+  exports: { a2a: "a2a" },
+
+  metadata: {
+    assessment_config: {
+      max_instances: 1,
+    },
+    participant_roles: ["coding_agent"],
+  },
+}

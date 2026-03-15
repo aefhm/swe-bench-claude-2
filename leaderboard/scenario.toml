@@ -1,0 +1,21 @@
+# SWE-bench Pro Leaderboard — Assessment Template
+#
+# Green agent: evaluates coding agents on SWE-bench Pro
+# Participant: a coding agent that receives problems and returns patches
+#
+# For the simple path: fill in image fields and run generate_compose.py
+# For Amber/quick-submit: fill in agentbeats_id fields
+
+[green_agent]
+agentbeats_id = ""  # TODO: set after registering on agentbeats.dev
+# For local testing without agentbeats registration:
+# image = "ghcr.io/rdi-foundation/swe-bench-green/green-agent:latest"
+env = { DOCKERHUB_USERNAME = "jefzda" }
+
+[[participants]]
+agentbeats_id = ""  # Submitter fills this in
+name = "coding_agent"
+env = { OPENAI_API_KEY = "${OPENAI_API_KEY}", ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}", MODEL_NAME = "gpt-4o" }
+
+[config]
+max_instances = 1

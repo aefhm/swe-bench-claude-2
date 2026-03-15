@@ -1,0 +1,146 @@
+name: CI — Build, Test, Publish
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Docker metadata for both images ──────────────────────────
+      - name: Extract metadata — green-agent
+        id: meta-green
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/green-agent
+          tags: |
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Extract metadata — purple-agent
+        id: meta-purple
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/purple-agent
+          tags: |
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # ── Build both images (no push yet) ──────────────────────────
+      - name: Build green-agent image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/green-agent/Dockerfile
+          push: false
+          tags: ${{ steps.meta-green.outputs.tags }}
+          labels: ${{ steps.meta-green.outputs.labels }}
+          load: true
+          platforms: linux/amd64
+
+      - name: Build purple-agent image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: packages/purple-agent/Dockerfile
+          push: false
+          tags: ${{ steps.meta-purple.outputs.tags }}
+          labels: ${{ steps.meta-purple.outputs.labels }}
+          load: true
+          platforms: linux/amd64
+
+      # ── Smoke test: start both containers, run gold-patch e2e ────
+      - name: Start green-agent container
+        run: |
+          docker run -d -p 9011:9011 \
+            --name green-agent \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            $(echo "${{ steps.meta-green.outputs.tags }}" | head -n1) \
+            --host 0.0.0.0 --port 9011
+          timeout 30 bash -c 'until curl -sf http://localhost:9011/.well-known/agent-card.json > /dev/null; do sleep 1; done'
+          echo "Green agent is ready."
+
+      - name: Start purple-agent container (gold mode)
+        run: |
+          docker run -d -p 9012:9012 \
+            --name purple-agent \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) \
+            --host 0.0.0.0 --port 9012 --use-gold-patches
+          timeout 30 bash -c 'until curl -sf http://localhost:9012/.well-known/agent-card.json > /dev/null; do sleep 1; done'
+          echo "Purple agent is ready."
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Run gold-patch e2e test
+        run: |
+          uv run python test_e2e_client.py \
+            --green-url http://localhost:9011 \
+            --purple-url http://localhost:9012
+        timeout-minutes: 15
+
+      - name: Show container logs
+        if: always()
+        run: |
+          echo "=== Green Agent Logs ==="
+          docker logs green-agent || true
+          echo ""
+          echo "=== Purple Agent Logs ==="
+          docker logs purple-agent || true
+          docker stop green-agent purple-agent || true
+
+      # ── Push to GHCR (only on main / tags, not PRs) ─────────────
+      - name: Log in to GitHub Container Registry
+        if: success() && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push green-agent image
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          echo "${{ steps.meta-green.outputs.tags }}" | while read -r tag; do
+            docker push "$tag"
+          done
+
+      - name: Push purple-agent image
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          echo "${{ steps.meta-purple.outputs.tags }}" | while read -r tag; do
+            docker push "$tag"
+          done
+
+      - name: Summary
+        if: success() && github.event_name != 'pull_request'
+        run: |
+          echo "## Docker Images Published 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### green-agent" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta-green.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### purple-agent" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta-purple.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

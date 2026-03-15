@@ -1,0 +1,18 @@
+[project]
+name = "purple-agent"
+version = "0.1.0"
+description = "A2A coding agent for SWE-bench Pro — wraps mini-swe-agent to solve real issues"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "a2a-sdk[http-server]>=0.3.20",
+    "uvicorn>=0.38.0",
+    "mini-swe-agent @ git+https://github.com/scaleapi/mini-swe-agent.git",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.1",
+]

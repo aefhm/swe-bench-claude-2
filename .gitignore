@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+amber-generated/
+*.egg-info/
+packages/green-agent/data/
+packages/purple-agent/data/
