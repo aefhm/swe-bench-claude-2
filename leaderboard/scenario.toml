@@ -14,7 +14,7 @@ env = { DOCKERHUB_USERNAME = "jefzda" }
 agentbeats_id = ""  # Submitter fills this in
 image = "ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest"
 name = "coding_agent"
-env = { USE_GOLD_PATCHES = "false", MODEL_NAME = "gpt-4o", OPENAI_API_KEY = "${OPENAI_API_KEY}", ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}" }
+env = { USE_GOLD_PATCHES = "false", MODEL_NAME = "anthropic/claude-sonnet-4-20250514", OPENAI_API_KEY = "${OPENAI_API_KEY}", ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}" }
 
 [config]
 max_instances = 1
