@@ -8,4 +8,3 @@ leaderboard/.env
 leaderboard/docker-compose.yml
 leaderboard/a2a-scenario.toml
 leaderboard/.env.example
-packages/green-agent/data/run_scripts/
