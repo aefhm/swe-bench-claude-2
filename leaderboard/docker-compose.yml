@@ -12,6 +12,7 @@ services:
       - DOCKERHUB_USERNAME=jefzda
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/home/agent/packages/green-agent/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9009/.well-known/agent-card.json"]
       interval: 5s
@@ -32,11 +33,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - USE_GOLD_PATCHES=true
-      - MODEL_NAME=gpt-4o
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/home/agent/packages/purple-agent/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9009/.well-known/agent-card.json"]
       interval: 5s

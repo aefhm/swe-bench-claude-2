@@ -18,3 +18,4 @@ env = { USE_GOLD_PATCHES = "false", MODEL_NAME = "gpt-4o", OPENAI_API_KEY = "${O
 
 [config]
 max_instances = 1
+# instance_ids = ["instance_qutebrowser__qutebrowser-..."]  # omit to run all

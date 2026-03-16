@@ -67,6 +67,7 @@ services:
     environment:{green_env}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/home/agent/packages/green-agent/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:{green_port}/.well-known/agent-card.json"]
       interval: 5s
@@ -103,6 +104,7 @@ PARTICIPANT_TEMPLATE = """  {name}:
     environment:{env}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/home/agent/packages/purple-agent/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:{port}/.well-known/agent-card.json"]
       interval: 5s

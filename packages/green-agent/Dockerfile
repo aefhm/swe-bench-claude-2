@@ -26,7 +26,8 @@ COPY --chown=agent pyproject.toml uv.lock ./
 # Copy this package
 COPY --chown=agent packages/green-agent/pyproject.toml packages/green-agent/
 COPY --chown=agent packages/green-agent/src packages/green-agent/src
-COPY --chown=agent packages/green-agent/data packages/green-agent/data
+# data/ is mounted at runtime from leaderboard/data/ — not baked into the image
+RUN mkdir -p packages/green-agent/data
 
 RUN \
     --mount=type=cache,target=/home/agent/.cache/uv,uid=1000 \
