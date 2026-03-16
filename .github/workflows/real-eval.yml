@@ -60,6 +60,7 @@ jobs:
       matrix:
         batch: ${{ fromJSON(needs.setup.outputs.batches) }}
       fail-fast: false
+      max-parallel: 20
 
     permissions:
       contents: read
@@ -88,8 +89,7 @@ jobs:
         working-directory: leaderboard
         run: |
           cat > .env <<EOF
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           EOF
 
       - name: Run batch — ${{ matrix.batch.id }}
