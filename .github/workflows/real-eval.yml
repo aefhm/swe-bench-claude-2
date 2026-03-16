@@ -67,6 +67,15 @@ jobs:
       packages: read
 
     steps:
+      - name: Free disk space
+        run: |
+          echo "Before cleanup: $(df -h / | tail -1 | awk '{print $4}') free"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost
+          sudo rm -rf /usr/local/graalvm /usr/local/share/powershell /usr/local/share/chromium
+          sudo rm -rf /usr/local/lib/node_modules /opt/hostedtoolcache
+          sudo docker image prune -af 2>/dev/null || true
+          echo "After cleanup: $(df -h / | tail -1 | awk '{print $4}') free"
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -158,8 +167,10 @@ jobs:
             echo "--- Purple Agent (last 30 lines) ---"
             docker logs coding_agent 2>&1 | tail -30 || true
 
-            # Cleanup containers for next instance
+            # Cleanup containers and reclaim disk for next instance
             docker compose down -v 2>/dev/null || true
+            docker system prune -af --volumes 2>/dev/null || true
+            echo "Disk free: $(df -h / | tail -1 | awk '{print $4}')"
 
             BATCH_TOTAL=$((BATCH_TOTAL + 1))
             if [ $EXIT_CODE -eq 0 ]; then
