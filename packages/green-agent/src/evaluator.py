@@ -103,14 +103,6 @@ python /workspace/parser.py /workspace/stdout.log /workspace/stderr.log /workspa
 """
 
 
-def _load_run_script(data_dir: str, instance_id: str, script_name: str) -> str:
-    path = os.path.join(data_dir, "run_scripts", instance_id, script_name)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Script not found: {path}")
-    with open(path) as f:
-        return f.read()
-
-
 def evaluate_patch(
     instance: dict,
     patch: str,
@@ -123,9 +115,9 @@ def evaluate_patch(
     Evaluate a patch for a SWE-bench Pro instance using local Docker.
 
     Args:
-        instance: Instance metadata dict (from instances.json)
+        instance: Instance metadata dict (from instances.jsonl)
         patch: The git diff patch to evaluate
-        data_dir: Path to data/ directory with run_scripts/
+        data_dir: Path to data/ directory (unused, kept for API compat)
         dockerhub_username: Docker Hub username for images
         docker_platform: Optional platform override (e.g. 'linux/amd64')
         timeout: Container timeout in seconds
@@ -141,17 +133,16 @@ def evaluate_patch(
     # Clean the patch
     cleaned_patch = strip_binary_hunks(patch)
 
-    # Load scripts
-    try:
-        run_script = _load_run_script(data_dir, uid, "run_script.sh")
-        parser_script = _load_run_script(data_dir, uid, "parser.py")
-    except FileNotFoundError as e:
+    # Read scripts from instance dict (inlined in JSONL)
+    run_script = instance.get("run_script", "")
+    parser_script = instance.get("parsing_script", "")
+    if not run_script or not parser_script:
         return EvalResult(
             instance_id=uid,
             passed=False,
             fail_to_pass_ok=False,
             pass_to_pass_ok=False,
-            error=str(e),
+            error=f"Missing run_script or parsing_script in instance data for {uid}",
         )
 
     entryscript = _build_entryscript(instance)

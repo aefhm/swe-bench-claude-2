@@ -26,7 +26,7 @@ def main():
         "--data-dir",
         type=str,
         default="data",
-        help="Path to the data directory containing instances.json and run_scripts/",
+        help="Path to the data directory containing instances.jsonl and run_scripts/",
     )
     parser.add_argument(
         "--dockerhub-username",

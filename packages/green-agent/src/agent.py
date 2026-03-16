@@ -50,9 +50,9 @@ class Agent:
     @property
     def instances(self) -> list[dict]:
         if self._instances is None:
-            instances_path = Path(self.data_dir) / "instances.json"
+            instances_path = Path(self.data_dir) / "instances.jsonl"
             with open(instances_path) as f:
-                self._instances = json.load(f)
+                self._instances = [json.loads(line) for line in f if line.strip()]
         return self._instances
 
     def validate_request(self, request: EvalRequest) -> tuple[bool, str]:
@@ -68,13 +68,21 @@ class Agent:
         return True, "ok"
 
     def _select_instances(self, config: dict[str, Any]) -> list[dict]:
-        """Select which instances to evaluate based on config."""
+        """Select which instances to evaluate based on config.
+
+        The 'instances' config key accepts a list of short_id or full instance_id values.
+        Falls back to 'instance_ids' (full IDs only) for backwards compatibility.
+        """
         instances = self.instances
 
-        # Filter by instance_ids if provided
-        if "instance_ids" in config:
-            target_ids = set(config["instance_ids"])
-            instances = [i for i in instances if i["instance_id"] in target_ids]
+        # Filter by instances (short_id or instance_id) or legacy instance_ids
+        filter_ids = config.get("instances") or config.get("instance_ids")
+        if filter_ids:
+            target = set(filter_ids)
+            instances = [
+                i for i in instances
+                if i.get("short_id") in target or i["instance_id"] in target
+            ]
 
         # Limit count if specified
         max_instances = config.get("max_instances", len(instances))

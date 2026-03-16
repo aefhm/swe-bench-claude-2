@@ -36,13 +36,18 @@ class Agent:
 
     @property
     def gold_patches(self) -> dict[str, str]:
-        """Lazy-load gold patches keyed by instance_id."""
+        """Lazy-load gold patches keyed by instance_id from instances.jsonl."""
         if self._gold_patches is None:
-            path = Path(self.data_dir) / "gold_patches.json"
+            path = Path(self.data_dir) / "instances.jsonl"
             if path.exists():
+                self._gold_patches = {}
                 with open(path) as f:
-                    raw = json.load(f)
-                self._gold_patches = {p["instance_id"]: p["patch"] for p in raw}
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        d = json.loads(line)
+                        if d.get("gold_patch"):
+                            self._gold_patches[d["instance_id"]] = d["gold_patch"]
             else:
                 self._gold_patches = {}
         return self._gold_patches
