@@ -11,17 +11,20 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
-      instances: ${{ steps.parse.outputs.instances }}
+      batches: ${{ steps.parse.outputs.batches }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Parse instance list from scenario.toml
+      - name: Parse instances and chunk into batches
         id: parse
         run: |
           pip install tomli -q
           python3 << 'PYEOF'
           import tomli, json, os
+
+          BATCH_SIZE = 10
+
           with open("leaderboard/scenario.toml", "rb") as f:
               data = tomli.load(f)
           instances = data.get("config", {}).get("instances", [])
@@ -29,18 +32,33 @@ jobs:
               with open("leaderboard/data/instances.jsonl") as f:
                   all_inst = [json.loads(line) for line in f if line.strip()]
               instances = [i["short_id"] for i in all_inst if "short_id" in i]
-          print(f"Found {len(instances)} instance(s): {instances}")
+
+          # Chunk into batches
+          batches = []
+          for i in range(0, len(instances), BATCH_SIZE):
+              batch = instances[i:i + BATCH_SIZE]
+              batches.append({
+                  "id": f"batch-{i // BATCH_SIZE :03d}",
+                  "instances": json.dumps(batch),
+              })
+
+          print(f"Total instances: {len(instances)}")
+          print(f"Batch size: {BATCH_SIZE}")
+          print(f"Total batches: {len(batches)}")
+          for b in batches:
+              print(f"  {b['id']}: {b['instances']}")
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"instances={json.dumps(instances)}\n")
+              out.write(f"batches={json.dumps(batches)}\n")
           PYEOF
 
   eval:
     needs: setup
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       matrix:
-        instance: ${{ fromJSON(needs.setup.outputs.instances) }}
+        batch: ${{ fromJSON(needs.setup.outputs.batches) }}
       fail-fast: false
 
     permissions:
@@ -59,45 +77,12 @@ jobs:
       - name: Install dependencies
         run: pip install tomli tomli-w pyyaml requests
 
-      - name: Configure scenario for single instance
-        working-directory: leaderboard
-        run: |
-          python3 << 'PYEOF'
-          import tomli, tomli_w
-          from pathlib import Path
-          data = tomli.loads(Path("scenario.toml").read_text())
-          data["config"]["instances"] = ["${{ matrix.instance }}"]
-          Path("scenario.toml").write_text(tomli_w.dumps(data))
-          print(Path("scenario.toml").read_text())
-          PYEOF
-
-      - name: Generate docker-compose.yml
-        working-directory: leaderboard
-        run: python generate_compose.py --scenario scenario.toml
-
-      - name: Show generated files
-        working-directory: leaderboard
-        run: |
-          echo "=== docker-compose.yml ==="
-          cat docker-compose.yml
-          echo ""
-          echo "=== a2a-scenario.toml ==="
-          cat a2a-scenario.toml
-
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull images
-        working-directory: leaderboard
-        run: docker compose pull
-
-      - name: Create output directory
-        working-directory: leaderboard
-        run: mkdir -p output && chmod 777 output
 
       - name: Write .env file with secrets
         working-directory: leaderboard
@@ -107,63 +92,105 @@ jobs:
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
           EOF
 
-      - name: Run assessment — ${{ matrix.instance }}
+      - name: Run batch — ${{ matrix.batch.id }}
         working-directory: leaderboard
         run: |
-          echo "Instance: ${{ matrix.instance }}"
-          START_TIME=$(date +%s)
-          docker compose up --timestamps --no-color --exit-code-from agentbeats-client --abort-on-container-exit || EXIT_CODE=$?
-          END_TIME=$(date +%s)
-          ELAPSED=$((END_TIME - START_TIME))
+          INSTANCES='${{ matrix.batch.instances }}'
+          echo "Batch: ${{ matrix.batch.id }}"
+          echo "Instances: $INSTANCES"
           echo ""
-          echo "=== Timing ==="
-          echo "Total runtime: ${ELAPSED}s ($((ELAPSED / 60))m $((ELAPSED % 60))s)"
-          echo "==============="
-          exit ${EXIT_CODE:-0}
 
-      - name: Show container logs
-        if: always()
-        working-directory: leaderboard
-        run: |
-          echo "=== Green Agent Logs ==="
-          docker logs green-agent 2>&1 | tail -200 || true
-          echo ""
-          echo "=== Purple Agent (coding_agent) Logs ==="
-          docker logs coding_agent 2>&1 | tail -200 || true
+          mkdir -p output/per-instance
+          BATCH_PASSED=0
+          BATCH_TOTAL=0
+          BATCH_ERRORS=""
 
-      - name: Show results
-        if: always()
-        working-directory: leaderboard
-        run: |
-          if [ -f output/results.json ]; then
-            echo "=== Results ==="
-            cat output/results.json
+          for INSTANCE in $(echo "$INSTANCES" | python3 -c "import sys,json; [print(i) for i in json.load(sys.stdin)]"); do
             echo ""
-            python3 -c "
-          import json
-          with open('output/results.json') as f:
-              r = json.load(f)
-          print(f\"Accuracy: {r.get('accuracy', 'N/A')}\")
-          print(f\"Passed: {r.get('passed', 'N/A')} / {r.get('total', 'N/A')}\")
-          for inst in r.get('results', []):
-              print(f\"  {inst.get('instance_id', '?')}: {'PASS' if inst.get('passed') else 'FAIL'}\")
-          " || true
-          else
-            echo "No results file found"
-          fi
+            echo "=========================================="
+            echo "  Instance: $INSTANCE"
+            echo "=========================================="
+            START_TIME=$(date +%s)
 
-      - name: Upload results artifact
+            # Override scenario.toml for this instance
+            python3 << PYEOF
+          import tomli, tomli_w
+          from pathlib import Path
+          data = tomli.loads(Path("scenario.toml").read_text())
+          data["config"]["instances"] = ["$INSTANCE"]
+          Path("scenario.toml").write_text(tomli_w.dumps(data))
+          PYEOF
+
+            # Generate compose
+            python generate_compose.py --scenario scenario.toml
+
+            # Pull images (only first time, cached after)
+            docker compose pull 2>/dev/null || true
+
+            # Create fresh output dir
+            rm -rf output/current
+            mkdir -p output/current && chmod 777 output/current
+
+            # Swap output mount to current
+            sed -i 's|./output:|./output/current:|g' docker-compose.yml
+
+            # Run
+            EXIT_CODE=0
+            docker compose up --timestamps --no-color --exit-code-from agentbeats-client --abort-on-container-exit || EXIT_CODE=$?
+
+            END_TIME=$(date +%s)
+            ELAPSED=$((END_TIME - START_TIME))
+            echo ""
+            echo "=== $INSTANCE finished in ${ELAPSED}s ($((ELAPSED / 60))m $((ELAPSED % 60))s) ==="
+
+            # Save per-instance results
+            if [ -f output/current/results.json ]; then
+              cp output/current/results.json "output/per-instance/${INSTANCE}.json"
+              echo "Results saved for $INSTANCE"
+            else
+              echo "WARNING: No results file for $INSTANCE"
+              echo "{\"instance\": \"$INSTANCE\", \"error\": \"no results file\", \"exit_code\": $EXIT_CODE}" > "output/per-instance/${INSTANCE}.json"
+            fi
+
+            # Show logs briefly
+            echo "--- Green Agent (last 30 lines) ---"
+            docker logs green-agent 2>&1 | tail -30 || true
+            echo "--- Purple Agent (last 30 lines) ---"
+            docker logs coding_agent 2>&1 | tail -30 || true
+
+            # Cleanup containers for next instance
+            docker compose down -v 2>/dev/null || true
+
+            BATCH_TOTAL=$((BATCH_TOTAL + 1))
+            if [ $EXIT_CODE -eq 0 ]; then
+              BATCH_PASSED=$((BATCH_PASSED + 1))
+            else
+              BATCH_ERRORS="$BATCH_ERRORS $INSTANCE"
+            fi
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "  Batch ${{ matrix.batch.id }} Summary"
+          echo "  Completed: $BATCH_TOTAL instances"
+          echo "  Passed: $BATCH_PASSED / $BATCH_TOTAL"
+          if [ -n "$BATCH_ERRORS" ]; then
+            echo "  Errors:$BATCH_ERRORS"
+          fi
+          echo "=========================================="
+
+      - name: Upload batch results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: eval-${{ matrix.instance }}
-          path: leaderboard/output/
+          name: eval-${{ matrix.batch.id }}
+          path: leaderboard/output/per-instance/
           retention-days: 30
 
-      - name: Cleanup
+      - name: Final cleanup
         if: always()
         working-directory: leaderboard
-        run: docker compose down -v || true
+        run: docker compose down -v 2>/dev/null || true
 
   summary:
     needs: [setup, eval]
@@ -175,6 +202,7 @@ jobs:
         with:
           path: results
           pattern: eval-*
+          merge-multiple: false
 
       - name: Aggregate results
         run: |
@@ -184,18 +212,30 @@ jobs:
           all_results = []
           total_passed = 0
           total_count = 0
+          errors = []
 
-          for f in sorted(glob.glob("results/eval-*/results.json")):
+          for f in sorted(glob.glob("results/eval-batch-*/*.json")):
               with open(f) as fh:
                   data = json.load(fh)
-              # agentbeats-client wraps results in a list
+
+              # Handle both formats: direct error or agentbeats results wrapper
+              if "error" in data and "results" not in data:
+                  all_results.append(data)
+                  total_count += 1
+                  errors.append(data.get("instance", os.path.basename(f)))
+                  continue
+
               result_sets = data.get("results", [])
-              for rs in result_sets:
-                  for inst in rs.get("results", []):
-                      all_results.append(inst)
-                      total_count += 1
-                      if inst.get("passed"):
-                          total_passed += 1
+              if isinstance(result_sets, list):
+                  for rs in result_sets:
+                      if isinstance(rs, dict) and "results" in rs:
+                          for inst in rs.get("results", []):
+                              all_results.append(inst)
+                              total_count += 1
+                              if inst.get("passed"):
+                                  total_passed += 1
+                              elif inst.get("error"):
+                                  errors.append(inst.get("instance_id", "?"))
 
           accuracy = total_passed / total_count if total_count > 0 else 0.0
           print(f"=== Aggregate Results ===")
@@ -203,9 +243,12 @@ jobs:
           print()
           for r in all_results:
               status = "PASS" if r.get("passed") else "FAIL"
-              iid = r.get("instance_id", "?")
+              iid = r.get("instance_id", r.get("instance", "?"))
               err = f"  error: {r['error']}" if r.get("error") else ""
               print(f"  [{status}] {iid}{err}")
+
+          if errors:
+              print(f"\n{len(errors)} instance(s) had errors")
 
           summary = {
               "accuracy": accuracy,
