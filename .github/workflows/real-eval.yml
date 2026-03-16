@@ -14,7 +14,7 @@ jobs:
       instances: ${{ steps.parse.outputs.instances }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Parse instance list from scenario.toml
         id: parse
@@ -49,10 +49,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload results artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: eval-${{ matrix.instance }}
           path: leaderboard/output/
@@ -171,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all results
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: results
           pattern: eval-*
@@ -218,7 +218,7 @@ jobs:
           PYEOF
 
       - name: Upload aggregate results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: eval-aggregate
           path: aggregate-results.json

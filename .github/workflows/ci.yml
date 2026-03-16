@@ -18,12 +18,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       # ── Docker metadata for both images ──────────────────────────
       - name: Extract metadata — green-agent
         id: meta-green
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}/green-agent
           tags: |
@@ -34,7 +34,7 @@ jobs:
 
       - name: Extract metadata — purple-agent
         id: meta-purple
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}/purple-agent
           tags: |
@@ -45,7 +45,7 @@ jobs:
 
       # ── Build both images (no push yet) ──────────────────────────
       - name: Build green-agent image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: packages/green-agent/Dockerfile
@@ -56,7 +56,7 @@ jobs:
           platforms: linux/amd64
 
       - name: Build purple-agent image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: packages/purple-agent/Dockerfile
@@ -74,7 +74,7 @@ jobs:
 
       # ── Gold-patch smoke test via scenario.ci.toml ───────────────
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
