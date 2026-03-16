@@ -1,12 +1,14 @@
 name: Real Eval (LLM)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["CI — Build, Test, Publish"]
+    types: [completed]
+    branches: [main]
 
 jobs:
   eval:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
