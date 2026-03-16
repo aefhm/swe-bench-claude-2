@@ -1,6 +1,10 @@
 # SWE-bench Pro — A2A Green Agent
 
-An [Agent-to-Agent (A2A)](https://github.com/google/A2A) assessment system for evaluating coding agents on [SWE-bench Pro](https://www.swebench.com/) — real-world software engineering tasks extracted from GitHub issues.
+An A2A assessment system for evaluating coding agents on [SWE-bench Pro](https://www.swebench.com/) — 731 real-world software engineering tasks extracted from GitHub issues.
+
+Both agents live in this monorepo for development convenience. They will be split into separate repos once the eval pipeline stabilizes — the green agent becomes the published leaderboard assessment, and the purple agent becomes a standalone participant that others can fork or replace.
+
+The Amber docker-gateway framework was tested in [swe-bench-claude](https://github.com/aefhm/swe-bench-claude) but has not been ported to this repo yet. This repo uses plain Docker Compose and GitHub Actions instead.
 
 ## Architecture
 
@@ -10,97 +14,40 @@ An [Agent-to-Agent (A2A)](https://github.com/google/A2A) assessment system for e
 │                    (or local docker compose)                        │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  ┌──────────────────┐                                               │
-│  │  agentbeats-      │                                               │
-│  │  client           │  eval request (config from scenario.toml)     │
-│  │  (orchestrator)   │ ─────────────────────┐                        │
-│  └──────────────────┘                       │                        │
-│         ▲                                   ▼                        │
-│         │ results              ┌──────────────────────┐              │
-│         │ (accuracy,           │                      │              │
-│         │  details)            │    Green Agent        │              │
-│         │                      │    (evaluator)        │              │
-│         │                      │    port 9009          │              │
-│         └──────────────────── │                      │              │
-│                                └───────┬──────┬───────┘              │
-│                            A2A/JSON-RPC│      │DooD                  │
-│                          ┌─────────────┘      │(put_archive/         │
-│                          ▼                    │ get_archive)         │
-│               ┌──────────────────────┐        │                      │
-│               │                      │        │                      │
-│               │  Purple Agent        │        │                      │
-│               │  (coding agent)      │        │                      │
-│               │  port 9009           │        │                      │
-│               │                      │        │                      │
-│               └──────────┬───────────┘        │                      │
-│                          │ DooD               │                      │
-│                          ▼                    ▼                      │
-│               ┌──────────────────────────────────────────────────┐   │
-│               │                Host Docker Daemon                 │   │
-│               │                                                   │   │
-│               │  ┌─────────────────────┐  ┌────────────────────┐  │   │
-│               │  │ SWE-bench container  │  │ SWE-bench container│  │   │
-│               │  │ (purple: solve issue)│  │ (green: run tests) │  │   │
-│               │  └─────────────────────┘  └────────────────────┘  │   │
-│               └──────────────────────────────────────────────────┘   │
-│                                                                     │
+│  agentbeats-client ──────> Green Agent (evaluator)                  │
+│         ▲                    │           │                           │
+│         │ results            │ A2A       │ DooD                      │
+│         │                    ▼           │ (put_archive/get_archive) │
+│         │              Purple Agent      │                           │
+│         │              (A2A wrapper      │                           │
+│         │               around           │                           │
+│         │               mini-swe-agent)  │                           │
+│         │                    │ DooD      │                           │
+│         │                    ▼           ▼                           │
+│         │              ┌──────────────────────────┐                 │
+│         │              │    Host Docker Daemon      │                 │
+│         │              │  SWE-bench containers     │                 │
+│         │              └──────────────────────────┘                 │
+│         └───────────────────────────────────────────                │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Evaluation Flow
+The purple agent is an A2A wrapper around [mini-swe-agent](https://github.com/SWE-bench/mini-swe-agent), which does the actual coding work inside a SWE-bench Docker container. Both agents use DooD to launch SWE-bench containers as siblings on the host Docker daemon. The green agent uses `put_archive`/`get_archive` (not volume mounts, which don't work in DooD) to transfer patches and scripts into eval containers.
 
-```
-agentbeats-client                Green Agent                 Purple Agent
-      │                              │                            │
-      │  eval request (config)       │                            │
-      │ ──────────────────────────> │                            │
-      │                              │                            │
-      │                              │  problem_statement +       │
-      │                              │  docker_image + commit     │
-      │                              │ ────────────────────────> │
-      │                              │                            │
-      │                              │                            │── launch SWE-bench
-      │                              │                            │   container (DooD)
-      │                              │                            │── solve issue
-      │                              │                            │   (LLM or gold patch)
-      │                              │                            │
-      │                              │  git diff patch            │
-      │                              │ <──────────────────────── │
-      │                              │                            │
-      │                              │── create eval container
-      │                              │   (SWE-bench image)
-      │                              │── put_archive: patch +
-      │                              │   run_script into container
-      │                              │── run tests
-      │                              │── get_archive: results
-      │                              │── compare FAIL_TO_PASS
-      │                              │   and PASS_TO_PASS
-      │                              │
-      │  results (accuracy, details) │                            │
-      │ <────────────────────────── │                            │
-      │                              │                            │
-```
+**Note on Docker access:** The purple agent needs Docker socket access to launch SWE-bench containers for the coding agent to work in. At least one model (tested on throw away code in swe-bench-claude) showed degraded performance when the coding agent was not given its own Docker container to operate in.
 
-### Data Flow
+## Data
+
+Single file: `leaderboard/data/instances.jsonl` — 731 lines, 29 MB. Each line is a self-contained JSON object with instance metadata, gold patch, run script, and parsing script inlined.
+
+Instance selection in `scenario.toml` uses human-friendly `short_id` values (e.g., `ansible-001`, `qutebrowser-042`). Set `instances = []` to run all 731.
 
 ```
 leaderboard/
-├── scenario.toml          ─── source of truth for real eval runs
-│   ├── model config           (model name, API key refs)
-│   ├── instance selection     (max_instances, instance_ids)
-│   └── agent images           (GHCR refs)
-│
-├── scenario.ci.toml       ─── CI gold-patch smoke test
-│   └── USE_GOLD_PATCHES=true  (no LLM, no API keys)
-│
-├── data/                  ─── dataset (mounted into agents at runtime)
-│   ├── instances.json         task definitions, docker images, test lists
-│   ├── gold_patches.json      known-good patches for pipeline testing
-│   └── run_scripts/           per-instance test harness scripts
-│       └── {instance_id}/
-│           ├── run_script.sh
-│           └── parser.py
-│
+├── scenario.toml          ─── real eval (model, instances, API keys)
+├── scenario.ci.toml       ─── CI gold-patch smoke test (USE_GOLD_PATCHES=true)
+├── data/
+│   └── instances.jsonl    ─── full SWE-bench Pro dataset
 └── generate_compose.py    ─── scenario.toml → docker-compose.yml
 ```
 
@@ -109,15 +56,15 @@ leaderboard/
 ```
 swe-bench-claude-2/
 ├── packages/
-│   ├── green-agent/           # Evaluator agent (pure eval engine)
+│   ├── green-agent/           # Evaluator
 │   │   ├── src/
 │   │   │   ├── server.py      # A2A server + agent card
-│   │   │   ├── agent.py       # Eval orchestration logic
+│   │   │   ├── agent.py       # Eval orchestration
 │   │   │   ├── evaluator.py   # Docker-based test runner (DooD)
 │   │   │   ├── executor.py    # A2A request handler
 │   │   │   └── messenger.py   # A2A client for green→purple
 │   │   ├── amber-manifest.json5
-│   │   └── Dockerfile         # No data baked in
+│   │   └── Dockerfile
 │   │
 │   └── purple-agent/          # Coding agent (participant)
 │       ├── src/
@@ -126,97 +73,88 @@ swe-bench-claude-2/
 │       │   ├── executor.py    # A2A request handler
 │       │   └── messenger.py   # A2A client utilities
 │       ├── amber-manifest.json5
-│       └── Dockerfile         # No data baked in
+│       └── Dockerfile
 │
-├── leaderboard/
-│   ├── scenario.toml          # Real eval config (model, instances, API keys)
-│   ├── scenario.ci.toml       # CI gold-patch config
-│   ├── scenario.json5         # Amber manifest (for quick-submit path)
-│   ├── data/                  # Dataset (mounted into agents at runtime)
-│   │   ├── instances.json
-│   │   ├── gold_patches.json
-│   │   └── run_scripts/
-│   ├── generate_compose.py    # scenario.toml → docker-compose.yml
-│   └── record_provenance.py   # Captures image digests for reproducibility
+├── leaderboard/               # Config + data (see above)
 │
 ├── .github/workflows/
 │   ├── ci.yml                 # Build → gold-patch test → push to GHCR
-│   └── real-eval.yml          # Real LLM eval (runs after CI succeeds on main)
+│   └── real-eval.yml          # Batched matrix eval (see Parallelization)
 │
 ├── test_e2e.sh                # Local e2e test (starts both agents natively)
 ├── test_e2e_client.py         # A2A test client
 └── pyproject.toml             # uv workspace root
 ```
 
-## Deployment Paths
+## Running
 
-### 1. Local Testing
-
-Run both agents natively with `uv`:
+### Local (native)
 
 ```bash
-./test_e2e.sh --gold          # Gold-patch pipeline test (no LLM needed)
+./test_e2e.sh --gold          # Gold-patch pipeline test (no LLM)
 ./test_e2e.sh --model gpt-4o  # Real eval with an LLM
 ```
 
-### 2. Docker Compose (scenario.toml)
-
-The standard AgentBeats leaderboard flow:
+### Docker Compose
 
 ```bash
 cd leaderboard
-pip install tomli tomli-w pyyaml requests
 python generate_compose.py --scenario scenario.toml
 cp .env.example .env  # fill in API keys
 mkdir -p output
 docker compose up --exit-code-from agentbeats-client
 ```
 
-Both agents get `./data` mounted in and Docker socket access for DooD evaluation.
+To test a single instance: set `instances = ["ansible-001"]` in `scenario.toml`.
 
-### 3. Amber Manifests (quick-submit)
+### GitHub Actions
 
-For the AgentBeats quick-submit path using Amber:
+Two workflows, chained via `workflow_run`:
 
-```bash
-# Compile scenario to docker-compose
-docker run --rm -v "$(pwd):/work" \
-  -e AMBER_DEV_IMAGE_TAGS="router=main,helper=main,provisioner=main,docker_gateway=main" \
-  ghcr.io/rdi-foundation/amber-cli:main \
-  compile /work/leaderboard/scenario.json5 --compose /work/amber-generated
+**CI** (`ci.yml`) — on push/PR: build images → gold-patch smoke test via `scenario.ci.toml` → push to GHCR.
 
-# Run
-cd amber-generated && docker compose up -d
+**Real Eval** (`real-eval.yml`) — after CI succeeds on main: pull images from GHCR → batched matrix eval using `scenario.toml` → aggregate results artifact. Requires `ANTHROPIC_API_KEY` repo secret.
+
+## Parallelization
+
+The real-eval workflow uses a **batched matrix** strategy to run all 731 instances across GitHub Actions runners.
+
+```
+setup job
+  │  parse scenario.toml → 731 instances → chunk into batches of 37
+  │  output: [batch-000, batch-001, ..., batch-019]
+  ▼
+eval jobs (matrix over batches, up to 20 concurrent)
+  ┌─────────────────┐  ┌─────────────────┐       ┌─────────────────┐
+  │ batch-000        │  │ batch-001        │  ...  │ batch-019        │
+  │ 37 instances     │  │ 37 instances     │       │ 5 instances      │
+  │ sequential loop  │  │ sequential loop  │       │ sequential loop  │
+  └────────┬─────── ┘  └────────┬────────┘       └────────┬────────┘
+           │                     │                          │
+           ▼                     ▼                          ▼
+       artifact:             artifact:                  artifact:
+       eval-batch-000        eval-batch-001             eval-batch-019
+                    \            |                      /
+                     ▼           ▼                     ▼
+                   summary job (aggregate all results)
+                     → eval-aggregate artifact
 ```
 
-Amber provides encrypted mesh networking between agents, a Docker socket gateway, and OpenTelemetry observability.
+Each eval job loops through its batch sequentially: override `scenario.toml` to single instance → `docker compose up` → collect results → `docker compose down` → next. Images are pulled once per job and cached.
 
-### 4. GitHub Actions
+**GitHub free-tier constraints:**
 
-Two workflows, chained:
+| Constraint | Limit | Our usage |
+|---|---|---|
+| Max matrix jobs per workflow | 256 | 20 (batches of 37) |
+| Concurrent jobs (public repo) | 20 | 20 — single wave |
+| Max job duration | 6 hours | ~3-5 hours per batch |
 
-**CI** (`ci.yml`) — triggers on push to main and PRs:
-- Builds both Docker images
-- Runs gold-patch smoke test via `scenario.ci.toml`
-- Pushes images to GHCR on success
+At 5-8 min/instance, full 731 run completes in **~3-5 hours** wall clock in a single wave (all 20 jobs concurrent, no queuing).
 
-**Real Eval** (`real-eval.yml`) — triggers after CI succeeds on main:
-- Pulls freshly built images from GHCR
-- Runs real LLM eval using `scenario.toml` config
-- Uploads results as GitHub Actions artifact
-- Requires `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) as repo secret
+**Tuning:** `BATCH_SIZE` in the setup job (`real-eval.yml`) controls the tradeoff. Current value of 37 fills exactly 20 jobs, saturating all concurrent slots without exceeding the 256 matrix limit.
 
-## Key Design Decisions
-
-**Dataset decoupled from images:** Instance data, gold patches, and test scripts live in `leaderboard/data/` and are mounted into agent containers at runtime. Changing the task set doesn't require an image rebuild. All run config (model, instance selection, max count) comes from `scenario.toml`.
-
-**Docker-outside-of-Docker (DooD):** Both agents launch sibling containers on the host Docker daemon. Volume mounts don't work in DooD (paths resolve on the host, not inside the container), so the green agent uses `put_archive`/`get_archive` to transfer files into evaluation containers.
-
-**A2A Protocol:** Both agents expose `/.well-known/agent-card.json` and communicate via JSON-RPC. The green agent discovers the purple agent's URL either from the eval request body (`participants.coding_agent`) or from the `CODING_AGENT_URL` environment variable (set by Amber slot bindings).
-
-**Port 9009:** Both agents default to port 9009, matching the AgentBeats convention. In Docker Compose, each container has its own network namespace so there's no port conflict.
-
-**Root user in containers:** Both agents run as root to access the Docker socket. The Amber docker-gateway proxy also requires root to bind `/var/run/docker.sock`.
+**API rate limits:** 20 concurrent jobs making LLM calls requires Anthropic API Tier 2+ (1,000 req/min). Tier 1 will throttle.
 
 ## Docker Images
 
@@ -225,4 +163,4 @@ ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest
 ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest
 ```
 
-Both images are built from the repo root (for uv workspace support) using `--frozen` to avoid lockfile mismatch in partial workspace copies. No data is baked in — mount `leaderboard/data/` at runtime.
+Built from repo root (uv workspace). No data baked in — `instances.jsonl` is mounted at runtime.

@@ -23,7 +23,7 @@ jobs:
           python3 << 'PYEOF'
           import tomli, json, os
 
-          BATCH_SIZE = 10
+          BATCH_SIZE = 37
 
           with open("leaderboard/scenario.toml", "rb") as f:
               data = tomli.load(f)
@@ -55,7 +55,7 @@ jobs:
   eval:
     needs: setup
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 330
     strategy:
       matrix:
         batch: ${{ fromJSON(needs.setup.outputs.batches) }}
