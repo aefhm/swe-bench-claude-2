@@ -1,7 +1,9 @@
 name: Real Eval (LLM)
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   eval:
