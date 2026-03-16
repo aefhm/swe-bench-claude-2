@@ -17,4 +17,10 @@ name = "coding_agent"
 env = { USE_GOLD_PATCHES = "false", MODEL_NAME = "anthropic/claude-sonnet-4-20250514", OPENAI_API_KEY = "${OPENAI_API_KEY}", ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}" }
 
 [config]
-# instances = ["qutebrowser-darkmode"]  # short_ids from instances.jsonl; omit to run all
+instances = [
+  "ansible-001", "ansible-002",
+  "openlibrary-001", "openlibrary-002",
+  "flipt-001", "flipt-002",
+  "qutebrowser-001", "qutebrowser-002",
+  "teleport-001", "teleport-002",
+]
