@@ -183,10 +183,15 @@ class Agent:
         # override it — otherwise `sleep 2h` gets passed as a bash
         # script arg and the container exits immediately.
         # Also override cwd to /app (swebench.yaml defaults to /testbed).
+        cmd_timeout = int(os.environ.get("MSWEA_CMD_TIMEOUT", 300))
+        step_limit = int(os.environ.get("MSWEA_STEP_LIMIT", 500))
+        cost_limit = float(os.environ.get("MSWEA_COST_LIMIT", 15.0))
+        temperature = float(os.environ.get("MSWEA_TEMPERATURE", 0.0))
+
         env = DockerEnvironment(
             image=docker_image,
             cwd="/app",
-            timeout=60,
+            timeout=cmd_timeout,
             run_args=["--rm", "--entrypoint", ""],
             env={
                 "PAGER": "cat",
@@ -198,7 +203,7 @@ class Agent:
         )
 
         try:
-            model_kwargs = {"temperature": 0.0, "drop_params": True}
+            model_kwargs = {"temperature": temperature, "drop_params": True}
             extra_kwargs = {}
             if "anthropic" in self.model_name or "claude" in self.model_name:
                 extra_kwargs["set_cache_control"] = "default_end"
@@ -216,8 +221,8 @@ class Agent:
                 instance_template=agent_cfg.get("instance_template", AgentConfig.instance_template),
                 action_observation_template=agent_cfg.get("action_observation_template", AgentConfig.action_observation_template),
                 format_error_template=agent_cfg.get("format_error_template", AgentConfig.format_error_template),
-                step_limit=agent_cfg.get("step_limit", 250),
-                cost_limit=agent_cfg.get("cost_limit", 3.0),
+                step_limit=agent_cfg.get("step_limit", step_limit),
+                cost_limit=agent_cfg.get("cost_limit", cost_limit),
             )
 
             exit_status, result_message, patch = agent.run(problem_statement)
