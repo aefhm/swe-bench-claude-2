@@ -173,7 +173,10 @@ class Agent:
         logger.info(f"  model: {self.model_name}")
 
         # Load the SWE-bench config for proper prompts/templates
-        config_path = get_config_path("swebench")
+        # Prefer vendored config next to this file, fall back to installed package
+        config_path = Path(__file__).resolve().parent.parent / "config" / "swebench.yaml"
+        if not config_path.exists():
+            config_path = get_config_path("swebench")
         with open(config_path) as f:
             swebench_config = yaml.safe_load(f)
         agent_cfg = swebench_config.get("agent", {})
