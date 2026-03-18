@@ -1,10 +1,7 @@
 name: Real Eval (LLM)
 
 on:
-  workflow_run:
-    workflows: ["CI — Build, Test, Publish"]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   setup:
