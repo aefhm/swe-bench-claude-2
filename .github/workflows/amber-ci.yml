@@ -142,7 +142,7 @@ jobs:
 
           with open("amber-out/a2a-scenario.toml", "w") as f:
               f.write('[green_agent]\n')
-              f.write('endpoint = "http://host.docker.internal:9009"\n\n')
+              f.write('endpoint = "http://127.0.0.1:9009"\n\n')
               f.write('[[participants]]\n')
               f.write('role = "coding_agent"\n\n')
               f.write('[config]\n')
@@ -155,7 +155,7 @@ jobs:
         run: |
           mkdir -p amber-out/output && chmod 777 amber-out/output
           docker run --rm \
-            --add-host host.docker.internal:host-gateway \
+            --network host \
             -v ${{ github.workspace }}/amber-out/a2a-scenario.toml:/app/scenario.toml \
             -v ${{ github.workspace }}/amber-out/output:/app/output \
             ghcr.io/agentbeats/agentbeats-client:v1.0.0 \
