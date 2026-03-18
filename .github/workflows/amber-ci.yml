@@ -123,7 +123,7 @@ jobs:
 
       - name: Start proxy
         run: |
-          amber proxy amber-out --export a2a=127.0.0.1:9009 &
+          amber proxy amber-out --export a2a=0.0.0.0:9009 &
           sleep 3
 
       # ── Run eval ───────────────────────────────────────────────
