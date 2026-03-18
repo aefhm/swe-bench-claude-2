@@ -48,16 +48,16 @@ def merge_parts(parts: list[Part]) -> str:
     return "\n".join(chunks)
 
 
-async def run_e2e(green_url: str, purple_url: str) -> bool:
+async def run_e2e(green_url: str, purple_url: str, max_instances: int = 1) -> bool:
     # Build the eval request payload
     eval_request = {
-        "participants": {
-            "coding_agent": purple_url,
-        },
+        "participants": {},
         "config": {
-            "max_instances": 1,
+            "max_instances": max_instances,
         },
     }
+    if purple_url:
+        eval_request["participants"]["coding_agent"] = purple_url
 
     print(f"Eval request:\n{json.dumps(eval_request, indent=2)}\n")
 
@@ -143,10 +143,11 @@ async def run_e2e(green_url: str, purple_url: str) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="E2E test client for SWE-bench green agent")
     parser.add_argument("--green-url", default="http://127.0.0.1:9011")
-    parser.add_argument("--purple-url", default="http://127.0.0.1:9012")
+    parser.add_argument("--purple-url", default="")
+    parser.add_argument("--max-instances", type=int, default=1)
     args = parser.parse_args()
 
-    success = asyncio.run(run_e2e(args.green_url, args.purple_url))
+    success = asyncio.run(run_e2e(args.green_url, args.purple_url, args.max_instances))
     sys.exit(0 if success else 1)
 
 

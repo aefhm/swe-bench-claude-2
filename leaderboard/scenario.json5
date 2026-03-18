@@ -12,8 +12,8 @@
     coding_agent: {
       manifest: "../packages/purple-agent/amber-manifest.json5",
       config: {
-        model_name: "gpt-4o",
-        use_gold_patches: "true",
+        model_name: "openrouter/deepseek/deepseek-v3.2",
+        use_gold_patches: "false",
       },
     },
   },

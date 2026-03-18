@@ -59,13 +59,13 @@ echo ""
 # --- 1. Start purple agent (participant) ---
 echo "==> Starting purple agent on :${PURPLE_PORT}..."
 cd "$PURPLE_DIR"
-uv run python src/server.py --host 127.0.0.1 --port "$PURPLE_PORT" --data-dir data $PURPLE_EXTRA_ARGS &
+uv run python src/server.py --host 127.0.0.1 --port "$PURPLE_PORT" --data-dir "$REPO_ROOT/leaderboard/data" $PURPLE_EXTRA_ARGS &
 PURPLE_PID=$!
 
 # --- 2. Start green agent (evaluator) ---
 echo "==> Starting green agent on :${GREEN_PORT}..."
 cd "$GREEN_DIR"
-uv run python src/server.py --host 127.0.0.1 --port "$GREEN_PORT" --data-dir data &
+uv run python src/server.py --host 127.0.0.1 --port "$GREEN_PORT" --data-dir "$REPO_ROOT/leaderboard/data" &
 GREEN_PID=$!
 
 # --- 3. Wait for both agents to be ready ---

@@ -25,8 +25,8 @@ COPY --chown=agent pyproject.toml uv.lock ./
 # Copy this package
 COPY --chown=agent packages/purple-agent/pyproject.toml packages/purple-agent/
 COPY --chown=agent packages/purple-agent/src packages/purple-agent/src
-# data/ is mounted at runtime from leaderboard/data/ — not baked into the image
-RUN mkdir -p packages/purple-agent/data
+# Bake instance data into the image so it works with both Amber and local runs
+COPY --chown=agent leaderboard/data packages/purple-agent/data
 
 RUN \
     --mount=type=cache,target=/home/agent/.cache/uv,uid=1000 \

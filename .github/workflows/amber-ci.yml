@@ -1,0 +1,203 @@
+name: Amber Eval
+
+on:
+  workflow_run:
+    workflows: ["CI — Build, Test, Publish"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      max_instances:
+        description: "Instances to evaluate (0 = all 731)"
+        default: "3"
+        type: string
+
+jobs:
+  amber-eval:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Free disk space
+        run: |
+          echo "Before: $(df -h / | tail -1 | awk '{print $4}') free"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/chromium /usr/local/graalvm /opt/hostedtoolcache 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          echo "After: $(df -h / | tail -1 | awk '{print $4}') free"
+
+      # ── Build images ───────────────────────────────────────────
+      - name: Build green-agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/green-agent/Dockerfile
+          push: false
+          tags: ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest
+          load: true
+          platforms: linux/amd64
+
+      - name: Build purple-agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/purple-agent/Dockerfile
+          push: false
+          tags: ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest
+          load: true
+          platforms: linux/amd64
+
+      # ── Compile Amber scenario (secrets resolved at compile time) ─
+      - name: Compile scenario
+        env:
+          AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY \
+            -v "${{ github.workspace }}:/work" \
+            ghcr.io/rdi-foundation/amber-cli:v0 \
+            compile /work/leaderboard/scenario.json5 \
+              --docker-compose /work/amber-out
+
+      # ── Patch compose for Docker socket bypass ─────────────────
+      - name: Patch compose for direct Docker socket
+        run: |
+          python3 - <<'PYTHON'
+          import re
+
+          with open("amber-out/compose.yaml") as f:
+              content = f.read()
+
+          # Remove gateway proxy spec
+          content = re.sub(
+              r'\n\s*- AMBER_DOCKER_MOUNT_PROXY_SPEC_B64=[^\n]+',
+              '',
+              content,
+          )
+
+          # Add direct Docker socket mount
+          for service in ['c1-coding-agent', 'c2-green']:
+              pattern = rf'(  {service}:.*?volumes:\n\s*- amber-helper-bin:/amber/bin:ro)'
+              replacement = r'\1\n    - /var/run/docker.sock:/var/run/docker.sock'
+              content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+
+          with open("amber-out/compose.yaml", "w") as f:
+              f.write(content)
+          PYTHON
+
+      # ── Start scenario ─────────────────────────────────────────
+      - name: Start Amber scenario
+        working-directory: amber-out
+        run: |
+          docker compose up -d
+          docker compose logs -f &
+
+      - name: Wait for agents
+        run: |
+          for i in $(seq 1 30); do
+            green=$(docker compose -f amber-out/compose.yaml logs c2-green 2>&1 | grep -c "Uvicorn running" || true)
+            purple=$(docker compose -f amber-out/compose.yaml logs c1-coding-agent 2>&1 | grep -c "Uvicorn running" || true)
+            if [ "$green" -ge 1 ] && [ "$purple" -ge 1 ]; then
+              echo "Both agents ready"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 3
+          done
+
+      # ── Start proxy ────────────────────────────────────────────
+      - name: Install amber CLI
+        run: |
+          docker create --name amber-extract ghcr.io/rdi-foundation/amber-cli:v0
+          docker cp amber-extract:/amber /usr/local/bin/amber
+          docker rm amber-extract
+          chmod +x /usr/local/bin/amber
+
+      - name: Start proxy
+        run: |
+          amber proxy amber-out --export a2a=127.0.0.1:9009 &
+          sleep 3
+
+      # ── Run eval ───────────────────────────────────────────────
+      - name: Generate a2a scenario
+        run: |
+          python3 << 'PYEOF'
+          import json
+
+          MAX = int("${{ inputs.max_instances || '3' }}")
+
+          with open("leaderboard/data/instances.jsonl") as f:
+              all_inst = [json.loads(line) for line in f if line.strip()]
+          instances = [i["short_id"] for i in all_inst if "short_id" in i]
+          if MAX > 0:
+              instances = instances[:MAX]
+
+          with open("amber-out/a2a-scenario.toml", "w") as f:
+              f.write('[green_agent]\n')
+              f.write('endpoint = "http://host.docker.internal:9009"\n\n')
+              f.write('[[participants]]\n')
+              f.write('role = "coding_agent"\n\n')
+              f.write('[config]\n')
+              f.write(f'instances = {json.dumps(instances)}\n')
+
+          print(f"Evaluating {len(instances)} instances")
+          PYEOF
+
+      - name: Run evaluation
+        run: |
+          mkdir -p amber-out/output && chmod 777 amber-out/output
+          docker run --rm \
+            --add-host host.docker.internal:host-gateway \
+            -v ${{ github.workspace }}/amber-out/a2a-scenario.toml:/app/scenario.toml \
+            -v ${{ github.workspace }}/amber-out/output:/app/output \
+            ghcr.io/agentbeats/agentbeats-client:v1.0.0 \
+            scenario.toml output/results.json
+        timeout-minutes: 300
+
+      # ── Results ────────────────────────────────────────────────
+      - name: Show results
+        if: always()
+        run: |
+          if [ -f amber-out/output/results.json ]; then
+            python3 -c "
+          import json
+          with open('amber-out/output/results.json') as f:
+              r = json.load(f)
+          print(f'Accuracy: {r.get(\"accuracy\", 0):.1%} ({r.get(\"passed\", 0)}/{r.get(\"total\", 0)})')
+          for inst in r.get('results', []):
+              s = 'PASS' if inst.get('passed') else 'FAIL'
+              e = f'  error: {inst[\"error\"]}' if inst.get('error') else ''
+              print(f'  [{s}] {inst.get(\"instance_id\", \"?\")}{e}')
+          "
+          else
+            echo "No results file"
+          fi
+
+      # ── Cleanup ────────────────────────────────────────────────
+      - name: Show logs
+        if: always()
+        run: |
+          echo "=== Coding Agent (last 50) ==="
+          docker compose -f amber-out/compose.yaml logs c1-coding-agent 2>&1 | tail -50 || true
+          echo "=== Green Agent (last 50) ==="
+          docker compose -f amber-out/compose.yaml logs c2-green 2>&1 | tail -50 || true
+
+      - name: Stop scenario
+        if: always()
+        run: docker compose -f amber-out/compose.yaml down -v || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: amber-eval-results
+          path: amber-out/output/
+          retention-days: 30
