@@ -34,9 +34,9 @@
       MSWEA_STEP_LIMIT: "${config.step_limit}",
       MSWEA_COST_LIMIT: "${config.cost_limit}",
       MSWEA_TEMPERATURE: "${config.temperature}",
-      OPENAI_API_KEY: { when: "config.openai_api_key", value: "${config.openai_api_key}" },
-      ANTHROPIC_API_KEY: { when: "config.anthropic_api_key", value: "${config.anthropic_api_key}" },
-      OPENROUTER_API_KEY: { when: "config.openrouter_api_key", value: "${config.openrouter_api_key}" },
+      OPENAI_API_KEY: "${config.openai_api_key}",
+      ANTHROPIC_API_KEY: "${config.anthropic_api_key}",
+      OPENROUTER_API_KEY: "${config.openrouter_api_key}",
     },
 
     mounts: [
