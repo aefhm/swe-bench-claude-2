@@ -36,7 +36,7 @@ jobs:
 
       # ── Build images ───────────────────────────────────────────
       - name: Build green-agent
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: packages/green-agent/Dockerfile
@@ -46,7 +46,7 @@ jobs:
           platforms: linux/amd64
 
       - name: Build purple-agent
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: packages/purple-agent/Dockerfile
