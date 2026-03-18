@@ -19,7 +19,7 @@
       anthropic_api_key: { type: "string", secret: true },
       openrouter_api_key: { type: "string", secret: true },
     },
-    required: [],
+    required: ["openrouter_api_key"],
     additionalProperties: false,
   },
 
@@ -36,7 +36,7 @@
       MSWEA_TEMPERATURE: "${config.temperature}",
       OPENAI_API_KEY: { when: "config.openai_api_key", value: "${config.openai_api_key}" },
       ANTHROPIC_API_KEY: { when: "config.anthropic_api_key", value: "${config.anthropic_api_key}" },
-      OPENROUTER_API_KEY: { when: "config.openrouter_api_key", value: "${config.openrouter_api_key}" },
+      OPENROUTER_API_KEY: "${config.openrouter_api_key}",
     },
 
     mounts: [
