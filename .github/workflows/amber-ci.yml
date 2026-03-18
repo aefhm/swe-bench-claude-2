@@ -55,13 +55,10 @@ jobs:
           load: true
           platforms: linux/amd64
 
-      # ── Compile Amber scenario (secrets resolved at compile time) ─
+      # ── Compile Amber scenario (secrets resolved at runtime by amber-helper) ─
       - name: Compile scenario
-        env:
-          AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           docker run --rm --user "$(id -u):$(id -g)" \
-            -e AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY \
             -v "${{ github.workspace }}:/work" \
             ghcr.io/rdi-foundation/amber-cli:main \
             compile /work/leaderboard/scenario.json5 \
@@ -89,21 +86,27 @@ jobs:
               replacement = r'\1\n    - /var/run/docker.sock:/var/run/docker.sock'
               content = re.sub(pattern, replacement, content, flags=re.DOTALL)
 
-          # Inject API key into coding agent
-          content = content.replace(
-              '    - AMBER_COMPONENT_MONIKER=/coding_agent',
-              '    - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}\n'
-              '    - AMBER_COMPONENT_MONIKER=/coding_agent',
-          )
-
           with open("amber-out/compose.yaml", "w") as f:
               f.write(content)
           PYTHON
 
+      - name: Verify compose uses runtime config resolution
+        run: |
+          echo "=== Checking for HelperRunner pattern ==="
+          if grep -q "AMBER_ROOT_CONFIG_SCHEMA_B64" amber-out/compose.yaml; then
+            echo "✓ Compose uses HelperRunner pattern (runtime config resolution)"
+          else
+            echo "✗ Compose uses Resolved pattern (compile-time). Secrets won't flow at runtime!"
+            echo "=== compose.yaml env section ==="
+            grep -A5 "AMBER_RESOLVED" amber-out/compose.yaml || true
+            exit 1
+          fi
+
+      # ── Pass secrets at runtime via AMBER_CONFIG_* env vars ───
       - name: Create .env with secrets
         working-directory: amber-out
         run: |
-          echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
+          echo "AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
 
       # ── Start scenario ─────────────────────────────────────────
       - name: Start Amber scenario
