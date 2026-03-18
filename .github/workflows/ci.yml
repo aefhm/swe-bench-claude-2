@@ -72,6 +72,36 @@ jobs:
           docker tag $(echo "${{ steps.meta-green.outputs.tags }}" | head -n1) ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest
           docker tag $(echo "${{ steps.meta-purple.outputs.tags }}" | head -n1) ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest
 
+      # ── A2A conformance tests (standalone green agent) ─────────
+      - name: Start green-agent container
+        env:
+          SECRETS_JSON: ${{ toJson(secrets) }}
+        run: |
+          echo "$SECRETS_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > .env
+          docker run -d -p 9009:9009 --name green-agent-test \
+            --env-file .env \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest \
+            --host 0.0.0.0 --port 9009
+          timeout 30 bash -c 'until curl -sf http://localhost:9009/.well-known/agent-card.json > /dev/null; do sleep 1; done'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install test dependencies
+        run: uv sync --extra test --package swe-bench-green-agent
+
+      - name: Run A2A conformance tests
+        run: uv run --package swe-bench-green-agent pytest packages/green-agent/tests -v --agent-url http://localhost:9009
+
+      - name: Stop green-agent and show logs
+        if: always()
+        run: |
+          echo "=== Green Agent Container Logs ==="
+          docker logs green-agent-test || true
+          docker stop green-agent-test || true
+          docker rm green-agent-test || true
+
       # ── Gold-patch smoke test via scenario.ci.toml ───────────────
       - name: Set up Python
         uses: actions/setup-python@v6

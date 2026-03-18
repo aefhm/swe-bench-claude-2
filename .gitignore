@@ -5,6 +5,7 @@ amber-generated/
 *.egg-info/
 leaderboard/output/
 leaderboard/.env
+leaderboard/.env.example
 leaderboard/docker-compose.yml
 leaderboard/a2a-scenario.toml
-leaderboard/.env.example
+amber-out/

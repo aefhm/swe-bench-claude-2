@@ -112,6 +112,33 @@ def test_agent_card(agent):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("streaming", [True, False])
+async def test_message(agent, streaming):
+    """Test that agent returns valid A2A message format."""
+    events = await send_text_message("Hello", agent, streaming=streaming)
+
+    all_errors = []
+    for event in events:
+        match event:
+            case Message() as msg:
+                errors = validate_event(msg.model_dump())
+                all_errors.extend(errors)
+
+            case (task, update):
+                errors = validate_event(task.model_dump())
+                all_errors.extend(errors)
+                if update:
+                    errors = validate_event(update.model_dump())
+                    all_errors.extend(errors)
+
+            case _:
+                pytest.fail(f"Unexpected event type: {type(event)}")
+
+    assert events, "Agent should respond with at least one event"
+    assert not all_errors, f"Message validation failed:\n" + "\n".join(all_errors)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [True, False])
 async def test_invalid_request_rejected(agent, streaming):
     """Test that invalid requests are properly rejected."""
     events = await send_text_message("not valid json", agent, streaming=streaming)

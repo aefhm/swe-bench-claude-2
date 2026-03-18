@@ -11,21 +11,70 @@ on:
         description: "Instances to evaluate (0 = all 731)"
         default: "3"
         type: string
+      batch_size:
+        description: "Instances per parallel runner"
+        default: "37"
+        type: string
 
 jobs:
-  amber-eval:
+  setup:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      batches: ${{ steps.parse.outputs.batches }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Parse instances and chunk into batches
+        id: parse
+        run: |
+          python3 << 'PYEOF'
+          import json, os
+
+          MAX = int("${{ inputs.max_instances || '0' }}")
+          BATCH_SIZE = int("${{ inputs.batch_size || '37' }}")
+
+          with open("leaderboard/data/instances.jsonl") as f:
+              all_inst = [json.loads(line) for line in f if line.strip()]
+          instances = [i["short_id"] for i in all_inst if "short_id" in i]
+
+          if MAX > 0:
+              instances = instances[:MAX]
+
+          batches = []
+          for i in range(0, len(instances), BATCH_SIZE):
+              batch = instances[i:i + BATCH_SIZE]
+              batches.append({
+                  "id": f"batch-{i // BATCH_SIZE:03d}",
+                  "instances": json.dumps(batch),
+              })
+
+          print(f"Total instances: {len(instances)}")
+          print(f"Batch size: {BATCH_SIZE}")
+          print(f"Total batches: {len(batches)}")
+          for b in batches:
+              print(f"  {b['id']}: {len(json.loads(b['instances']))} instances")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"batches={json.dumps(batches)}\n")
+          PYEOF
+
+  eval:
+    needs: setup
+    runs-on: ubuntu-latest
     timeout-minutes: 330
+    strategy:
+      matrix:
+        batch: ${{ fromJSON(needs.setup.outputs.batches) }}
+      fail-fast: false
+      max-parallel: 20
 
     permissions:
       contents: read
       packages: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Free disk space
         run: |
           echo "Before: $(df -h / | tail -1 | awk '{print $4}') free"
@@ -34,28 +83,17 @@ jobs:
           sudo docker image prune -af 2>/dev/null || true
           echo "After: $(df -h / | tail -1 | awk '{print $4}') free"
 
-      # ── Build images ───────────────────────────────────────────
-      - name: Build green-agent
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: packages/green-agent/Dockerfile
-          push: false
-          tags: ghcr.io/aefhm/swe-bench-claude-2/green-agent:latest
-          load: true
-          platforms: linux/amd64
+      - name: Checkout
+        uses: actions/checkout@v7
 
-      - name: Build purple-agent
-        uses: docker/build-push-action@v7
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
-          context: .
-          file: packages/purple-agent/Dockerfile
-          push: false
-          tags: ghcr.io/aefhm/swe-bench-claude-2/purple-agent:latest
-          load: true
-          platforms: linux/amd64
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Compile Amber scenario (secrets resolved at runtime by amber-helper) ─
+      # ── Compile Amber scenario ────────────────────────────────
       - name: Compile scenario
         run: |
           docker run --rm --user "$(id -u):$(id -g)" \
@@ -64,7 +102,6 @@ jobs:
             compile /work/leaderboard/scenario.json5 \
               --docker-compose /work/amber-out
 
-      # ── Patch compose for Docker socket bypass ─────────────────
       - name: Patch compose for direct Docker socket
         run: |
           python3 - <<'PYTHON'
@@ -73,14 +110,12 @@ jobs:
           with open("amber-out/compose.yaml") as f:
               content = f.read()
 
-          # Remove gateway proxy spec
           content = re.sub(
               r'\n\s*- AMBER_DOCKER_MOUNT_PROXY_SPEC_B64=[^\n]+',
               '',
               content,
           )
 
-          # Add direct Docker socket mount
           for service in ['c1-coding-agent', 'c2-green']:
               pattern = rf'(  {service}:.*?volumes:\n\s*- amber-helper-bin:/amber/bin:ro)'
               replacement = r'\1\n    - /var/run/docker.sock:/var/run/docker.sock'
@@ -90,25 +125,20 @@ jobs:
               f.write(content)
           PYTHON
 
-      - name: Verify compose uses runtime config resolution
-        run: |
-          echo "=== Checking for HelperRunner pattern ==="
-          if grep -q "AMBER_ROOT_CONFIG_SCHEMA_B64" amber-out/compose.yaml; then
-            echo "✓ Compose uses HelperRunner pattern (runtime config resolution)"
-          else
-            echo "✗ Compose uses Resolved pattern (compile-time). Secrets won't flow at runtime!"
-            echo "=== compose.yaml env section ==="
-            grep -A5 "AMBER_RESOLVED" amber-out/compose.yaml || true
-            exit 1
-          fi
-
-      # ── Pass secrets at runtime via AMBER_CONFIG_* env vars ───
       - name: Create .env with secrets
         working-directory: amber-out
         run: |
           echo "AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
 
-      # ── Start scenario ─────────────────────────────────────────
+      # ── Install amber CLI for proxy ───────────────────────────
+      - name: Install amber CLI
+        run: |
+          docker create --name amber-extract ghcr.io/rdi-foundation/amber-cli:main
+          docker cp amber-extract:/amber /usr/local/bin/amber
+          docker rm amber-extract
+          chmod +x /usr/local/bin/amber
+
+      # ── Start Amber scenario (stays up for entire batch) ──────
       - name: Start Amber scenario
         working-directory: amber-out
         run: |
@@ -117,86 +147,104 @@ jobs:
 
       - name: Wait for agents
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             green=$(docker compose -f amber-out/compose.yaml logs c2-green 2>&1 | grep -c "Uvicorn running" || true)
             purple=$(docker compose -f amber-out/compose.yaml logs c1-coding-agent 2>&1 | grep -c "Uvicorn running" || true)
             if [ "$green" -ge 1 ] && [ "$purple" -ge 1 ]; then
               echo "Both agents ready"
               break
             fi
-            echo "Waiting... ($i/30)"
+            echo "Waiting... ($i/60)"
             sleep 3
           done
-
-      # ── Start proxy ────────────────────────────────────────────
-      - name: Install amber CLI
-        run: |
-          docker create --name amber-extract ghcr.io/rdi-foundation/amber-cli:main
-          docker cp amber-extract:/amber /usr/local/bin/amber
-          docker rm amber-extract
-          chmod +x /usr/local/bin/amber
 
       - name: Start proxy
         run: |
           amber proxy amber-out --export a2a=0.0.0.0:9009 &
           sleep 3
 
-      # ── Run eval ───────────────────────────────────────────────
-      - name: Generate a2a scenario
+      # ── Run batch ─────────────────────────────────────────────
+      - name: Run batch — ${{ matrix.batch.id }}
         run: |
-          python3 << 'PYEOF'
+          INSTANCES='${{ matrix.batch.instances }}'
+          echo "Batch: ${{ matrix.batch.id }}"
+          echo "Instances: $INSTANCES"
+          echo ""
+
+          mkdir -p amber-out/output/per-instance
+          BATCH_PASSED=0
+          BATCH_TOTAL=0
+          BATCH_ERRORS=""
+
+          for INSTANCE in $(echo "$INSTANCES" | python3 -c "import sys,json; [print(i) for i in json.load(sys.stdin)]"); do
+            echo ""
+            echo "=========================================="
+            echo "  Instance: $INSTANCE"
+            echo "=========================================="
+            START_TIME=$(date +%s)
+
+            # Generate a2a scenario for this single instance
+            python3 << PYEOF
           import json
-
-          MAX = int("${{ inputs.max_instances || '3' }}")
-
-          with open("leaderboard/data/instances.jsonl") as f:
-              all_inst = [json.loads(line) for line in f if line.strip()]
-          instances = [i["short_id"] for i in all_inst if "short_id" in i]
-          if MAX > 0:
-              instances = instances[:MAX]
-
           with open("amber-out/a2a-scenario.toml", "w") as f:
               f.write('[green_agent]\n')
               f.write('endpoint = "http://127.0.0.1:9009"\n\n')
               f.write('[[participants]]\n')
               f.write('role = "coding_agent"\n\n')
               f.write('[config]\n')
-              f.write(f'instances = {json.dumps(instances)}\n')
-
-          print(f"Evaluating {len(instances)} instances")
+              f.write(f'instances = {json.dumps(["$INSTANCE"])}\n')
           PYEOF
 
-      - name: Run evaluation
-        run: |
-          mkdir -p amber-out/output && chmod 777 amber-out/output
-          docker run --rm \
-            --network host \
-            -v ${{ github.workspace }}/amber-out/a2a-scenario.toml:/app/scenario.toml \
-            -v ${{ github.workspace }}/amber-out/output:/app/output \
-            ghcr.io/agentbeats/agentbeats-client:v1.0.0 \
-            scenario.toml output/results.json
+            # Run agentbeats-client for this instance
+            rm -rf amber-out/output/current
+            mkdir -p amber-out/output/current && chmod 777 amber-out/output/current
+
+            EXIT_CODE=0
+            docker run --rm \
+              --network host \
+              -v ${{ github.workspace }}/amber-out/a2a-scenario.toml:/app/scenario.toml \
+              -v ${{ github.workspace }}/amber-out/output/current:/app/output \
+              ghcr.io/agentbeats/agentbeats-client:v1.0.0 \
+              scenario.toml output/results.json || EXIT_CODE=$?
+
+            END_TIME=$(date +%s)
+            ELAPSED=$((END_TIME - START_TIME))
+            echo ""
+            echo "=== $INSTANCE finished in ${ELAPSED}s ($((ELAPSED / 60))m $((ELAPSED % 60))s) ==="
+
+            # Save per-instance results
+            if [ -f amber-out/output/current/results.json ]; then
+              cp amber-out/output/current/results.json "amber-out/output/per-instance/${INSTANCE}.json"
+              echo "Results saved for $INSTANCE"
+            else
+              echo "WARNING: No results file for $INSTANCE"
+              echo "{\"instance\": \"$INSTANCE\", \"error\": \"no results file\", \"exit_code\": $EXIT_CODE}" > "amber-out/output/per-instance/${INSTANCE}.json"
+            fi
+
+            # Clean up sweap evaluation images to reclaim disk (agents stay running)
+            docker images --filter "reference=*/sweap-images:*" -q | xargs -r docker rmi -f 2>/dev/null || true
+            echo "Disk free: $(df -h / | tail -1 | awk '{print $4}')"
+
+            BATCH_TOTAL=$((BATCH_TOTAL + 1))
+            if [ $EXIT_CODE -eq 0 ]; then
+              BATCH_PASSED=$((BATCH_PASSED + 1))
+            else
+              BATCH_ERRORS="$BATCH_ERRORS $INSTANCE"
+            fi
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "  Batch ${{ matrix.batch.id }} Summary"
+          echo "  Completed: $BATCH_TOTAL instances"
+          echo "  Passed: $BATCH_PASSED / $BATCH_TOTAL"
+          if [ -n "$BATCH_ERRORS" ]; then
+            echo "  Errors:$BATCH_ERRORS"
+          fi
+          echo "=========================================="
         timeout-minutes: 300
 
-      # ── Results ────────────────────────────────────────────────
-      - name: Show results
-        if: always()
-        run: |
-          if [ -f amber-out/output/results.json ]; then
-            python3 -c "
-          import json
-          with open('amber-out/output/results.json') as f:
-              r = json.load(f)
-          print(f'Accuracy: {r.get(\"accuracy\", 0):.1%} ({r.get(\"passed\", 0)}/{r.get(\"total\", 0)})')
-          for inst in r.get('results', []):
-              s = 'PASS' if inst.get('passed') else 'FAIL'
-              e = f'  error: {inst[\"error\"]}' if inst.get('error') else ''
-              print(f'  [{s}] {inst.get(\"instance_id\", \"?\")}{e}')
-          "
-          else
-            echo "No results file"
-          fi
-
-      # ── Cleanup ────────────────────────────────────────────────
+      # ── Cleanup ──────────────────────────────────────────────
       - name: Show logs
         if: always()
         run: |
@@ -209,10 +257,84 @@ jobs:
         if: always()
         run: docker compose -f amber-out/compose.yaml down -v || true
 
-      - name: Upload results
+      - name: Upload batch results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: amber-eval-results
-          path: amber-out/output/
+          name: amber-eval-${{ matrix.batch.id }}
+          path: amber-out/output/per-instance/
+          retention-days: 30
+
+  summary:
+    needs: [setup, eval]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v8
+        with:
+          path: results
+          pattern: amber-eval-*
+          merge-multiple: false
+
+      - name: Aggregate results
+        run: |
+          python3 << 'PYEOF'
+          import json, glob, os
+
+          all_results = []
+          total_passed = 0
+          total_count = 0
+          errors = []
+
+          for f in sorted(glob.glob("results/amber-eval-batch-*/*.json")):
+              with open(f) as fh:
+                  data = json.load(fh)
+
+              if "error" in data and "results" not in data:
+                  all_results.append(data)
+                  total_count += 1
+                  errors.append(data.get("instance", os.path.basename(f)))
+                  continue
+
+              result_sets = data.get("results", [])
+              if isinstance(result_sets, list):
+                  for rs in result_sets:
+                      if isinstance(rs, dict) and "results" in rs:
+                          for inst in rs.get("results", []):
+                              all_results.append(inst)
+                              total_count += 1
+                              if inst.get("passed"):
+                                  total_passed += 1
+                              elif inst.get("error"):
+                                  errors.append(inst.get("instance_id", "?"))
+
+          accuracy = total_passed / total_count if total_count > 0 else 0.0
+          print(f"=== Aggregate Results ===")
+          print(f"Accuracy: {accuracy:.1%} ({total_passed}/{total_count})")
+          print()
+          for r in all_results:
+              status = "PASS" if r.get("passed") else "FAIL"
+              iid = r.get("instance_id", r.get("instance", "?"))
+              err = f"  error: {r['error']}" if r.get("error") else ""
+              print(f"  [{status}] {iid}{err}")
+
+          if errors:
+              print(f"\n{len(errors)} instance(s) had errors")
+
+          summary = {
+              "accuracy": accuracy,
+              "passed": total_passed,
+              "total": total_count,
+              "results": all_results,
+          }
+          with open("aggregate-results.json", "w") as f:
+              json.dump(summary, f, indent=2)
+          PYEOF
+
+      - name: Upload aggregate results
+        uses: actions/upload-artifact@v7
+        with:
+          name: amber-eval-aggregate
+          path: aggregate-results.json
           retention-days: 30
