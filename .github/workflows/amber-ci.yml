@@ -63,7 +63,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" \
             -e AMBER_CONFIG_CODING_AGENT__OPENROUTER_API_KEY \
             -v "${{ github.workspace }}:/work" \
-            ghcr.io/rdi-foundation/amber-cli:v0 \
+            ghcr.io/rdi-foundation/amber-cli:main \
             compile /work/leaderboard/scenario.json5 \
               --docker-compose /work/amber-out
 
@@ -116,7 +116,7 @@ jobs:
       # ── Start proxy ────────────────────────────────────────────
       - name: Install amber CLI
         run: |
-          docker create --name amber-extract ghcr.io/rdi-foundation/amber-cli:v0
+          docker create --name amber-extract ghcr.io/rdi-foundation/amber-cli:main
           docker cp amber-extract:/amber /usr/local/bin/amber
           docker rm amber-extract
           chmod +x /usr/local/bin/amber
