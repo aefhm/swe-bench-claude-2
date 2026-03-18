@@ -89,9 +89,21 @@ jobs:
               replacement = r'\1\n    - /var/run/docker.sock:/var/run/docker.sock'
               content = re.sub(pattern, replacement, content, flags=re.DOTALL)
 
+          # Inject API key into coding agent
+          content = content.replace(
+              '    - AMBER_COMPONENT_MONIKER=/coding_agent',
+              '    - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}\n'
+              '    - AMBER_COMPONENT_MONIKER=/coding_agent',
+          )
+
           with open("amber-out/compose.yaml", "w") as f:
               f.write(content)
           PYTHON
+
+      - name: Create .env with secrets
+        working-directory: amber-out
+        run: |
+          echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
 
       # ── Start scenario ─────────────────────────────────────────
       - name: Start Amber scenario
